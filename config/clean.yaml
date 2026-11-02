@@ -1,4 +1,4 @@
-# Cleaning layer: turns audit findings into fixed rules. data/raw/ stays read-only.
+# Cleaning layer: deletes only non-observations, flags everything else. data/raw/ stays read-only.
 
 paths:
   raw_root: data/raw
@@ -22,17 +22,36 @@ clock:
   top_residual_dates: 20
 
 rules:
-  # 1. snapshots
-  max_age_min: 10                    # age = bar end (timestamp + 1h) - obs_time
-  # 2. lingering rows inside a curve
-  lingering_tol_s: 60                # drop rows whose raw_timestamp < curve obs_time - this
-  # 3. expiries
-  min_tenor_days: 1.0                # calendar tenor at obs_time
-  min_r_squared: 0.9
-  require_vol_curve_check: GOOD
+  # Deleted (not real observations): 1a forward-filled curves, 2a lingering rows, 2b stale atm pairs.
+  lingering_tol_s: 60                # 2a: drop rows whose raw_timestamp < curve obs_time - this
+  # Flagged only (real observations kept; research decides via src/clean/filters.py):
+  max_age_min: 10                    # 1b -> flag_late_snapshot: age = bar end (timestamp + 1h) - obs_time > this
+  min_tenor_days: 1.0                # 3a -> flag_short_tenor: calendar tenor at obs_time < this
+  min_r_squared: 0.9                 # 3b -> flag_low_r2: curve r_squared < this (missing r_squared also flagged)
   # 4. IV floor (flag only)
   iv_floor: 0.03
   iv_floor_tol: 1.0e-6
+
+# 3c -> vendor_check / vendor_check_class. Every vol_curve_check value must be listed; unknown values abort the build.
+#   fit_quality : the vendor could not fit a usable curve (input coverage or pipeline failure)
+#   value_screen: the vendor screened on the IV *value* (vs RV, vs its own history, vs a base level);
+#                 dropping these would truncate exactly the VRP tails under study
+#   ambiguous   : shape screen that catches both broken fits and possibly genuine moves
+vendor_check_classes:
+  GOOD: [GOOD]
+  fit_quality: [EARLY_EXIT_INSUFFICIENT_STRIKES, FAILED_PIPELINE, MONEYNESS_DISCREPANCY]
+  value_screen: [IV_RV_DIFF, BAD_BASE_VAL, VOL_SPIKE]
+  ambiguous: [BAD_SHAPE]
+
+# Default research filter, applied only through src/clean/filters.py::apply_research_filter().
+# Not stored in the panel: it is recomputed from the raw flag columns every time it is used.
+research_default_filter:
+  exclude_late_snapshot: true
+  exclude_short_tenor: true
+  exclude_low_r2: true
+  exclude_fit_quality: true
+  exclude_value_screen: false
+  exclude_ambiguous: false
 
 flags:
   butterfly_slope_tol: 1.0e-9        # on call prices recomputed from w

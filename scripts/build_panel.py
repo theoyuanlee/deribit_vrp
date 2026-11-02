@@ -55,7 +55,7 @@ def main():
     print(f"options: {len(dates)} days -> {out}")
 
     state, last = aopt.new_state(), None
-    curves, points, ledger = [], [], []
+    curves, points, pairs, ledger = [], [], [], []
     t0 = time.time()
     for i, d in enumerate(dates):
         prev_day = (pd.Timestamp(d) - pd.Timedelta("1D")).strftime("%Y-%m-%d")
@@ -69,13 +69,14 @@ def main():
             continue
         df = aopt.prepare(df)
         es, state = aopt.expiry_snapshots(df, state, acfg)
-        c, p, led = panel.clean_day(df, es, d, cfg)
-        curves.append(c), points.append(p), ledger.extend(led)
+        c, p, pr, led = panel.clean_day(df, es, d, cfg)
+        curves.append(c), points.append(p), pairs.append(pr), ledger.extend(led)
         if (i + 1) % 25 == 0 or i + 1 == len(dates):
             print(f"  {i + 1}/{len(dates)} {d} ({time.time() - t0:.0f}s)", flush=True)
     curves = pd.concat([c for c in curves if len(c)], ignore_index=True)
     points = pd.concat([p for p in points if len(p)], ignore_index=True)
-    ledger = pd.DataFrame(ledger)
+    pairs = pd.concat([p for p in pairs if len(p)], ignore_index=True)
+    ledger = pd.DataFrame(ledger, columns=panel.LEDGER_COLS)
 
     # Underlying: always the full year (zero-run detection needs the continuous series).
     ur = cfg["ranges"]["underlyings"]
@@ -85,6 +86,7 @@ def main():
 
     curves.to_parquet(out / "surface_curves.parquet", index=False)
     points.to_parquet(out / "surface_points.parquet", index=False)
+    pairs.to_parquet(out / "surface_calendar_pairs.parquet", index=False)
     und.to_parquet(out / "underlying_hourly.parquet", index=False)
     clock_tab.to_parquet(out / "hour_of_week_clock.parquet", index=False)
     clock_dates.to_parquet(out / "hour_of_week_clock_residual_dates.parquet", index=False)
@@ -92,9 +94,9 @@ def main():
     meta = {"opt_dates": f"{dates[0]} 至 {dates[-1]}（{len(dates)} 天）" if len(dates) > 3 else ", ".join(dates),
             "und_range": f"{ur['start']} 至 {ur['end']}", "generated": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M"),
             "files": sorted(p.name for p in out.glob("*.parquet"))}
-    (out / "clean_report.md").write_text(report.markdown(ledger, curves, points, und_stats, und, clock_tab, clock_dates,
+    (out / "clean_report.md").write_text(report.markdown(ledger, curves, points, pairs, und_stats, und, clock_tab, clock_dates,
                                                          clock_stats, cfg, meta))
-    print(f"done -> {out / 'clean_report.md'}  curves={len(curves)} points={len(points)}")
+    print(f"done -> {out / 'clean_report.md'}  curves={len(curves)} points={len(points)} pairs={len(pairs)}")
 
 
 if __name__ == "__main__":
