@@ -124,7 +124,7 @@ def markdown(ledger, curves, points, pairs, und_stats, und, clock_tab, clock_dat
     rc = cfg["rules"]
     keep_default, filter_items = filters.research_mask(curves, cfg=cfg)
     w("# 清洗层报告（研究面板）\n")
-    w(f"- 期权日期：{meta['opt_dates']}；标的：{meta['und_range']}；生成：{meta['generated']}；配置 `config/clean.yaml`。")
+    w(f"- 期权日期：{meta['opt_dates']}；标的：{meta['und_range']}；生成信息（提交、配置、时间）见同目录下的 `_build_info.json`。")
     w("- `data/raw/` 只读；面板中不含原始 `implied_vol`，只保存 w = implied_vol² × tau_years 以及 tau_cal / tau_vol。")
     w("- **原则：面板只删除不是真实观测的数据（复制的曲线、曲线内残留的旧行），其余真实观测即使质量可疑也保留，只加标记。**"
       "研究代码统一通过 `clean.filters.apply_research_filter()` 现场决定用哪些曲线；面板里不保存“是否通过”的列。\n")

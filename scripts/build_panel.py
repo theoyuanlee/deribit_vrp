@@ -94,7 +94,7 @@ def main():
     clock_dates.to_parquet(out / "hour_of_week_clock_residual_dates.parquet", index=False)
     ledger.to_parquet(out / "clean_rule_ledger_daily.parquet", index=False)
     meta = {"opt_dates": f"{dates[0]} 至 {dates[-1]}（{len(dates)} 天）" if len(dates) > 3 else ", ".join(dates),
-            "und_range": f"{ur['start']} 至 {ur['end']}", "generated": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M"),
+            "und_range": f"{ur['start']} 至 {ur['end']}",
             "files": sorted(p.name for p in out.glob("*.parquet"))}
     (out / "clean_report.md").write_text(report.markdown(ledger, curves, points, pairs, und_stats, und, clock_tab, clock_dates,
                                                          clock_stats, cfg, meta))

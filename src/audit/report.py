@@ -284,7 +284,7 @@ def markdown(r: dict, s: dict, cfg: dict, meta: dict) -> str:
     w = L.append
     w(f"# BTC 期权与标的小时数据审计\n")
     w(f"- 期权日期：{meta['opt_start']} 至 {meta['opt_end']}（{meta['n_opt_days']} 天）；标的：{meta['und_start']} 至 {meta['und_end']}（{meta['n_und_days']} 天）")
-    w(f"- 生成时间：{meta['generated']}；配置：`{meta['config']}`")
+    w("- 生成信息（提交、配置、时间）见同目录下的 `_build_info.json`。")
     w("- 本审计只检测、只报告，未修改 `data/raw/` 中任何数据。\n")
 
     w("## 约定\n")

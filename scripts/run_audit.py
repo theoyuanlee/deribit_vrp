@@ -161,7 +161,7 @@ def main():
     meta = {
         "opt_start": opt_dates[0] if opt_dates else "-", "opt_end": opt_dates[-1] if opt_dates else "-", "n_opt_days": len(opt_dates),
         "und_start": und_dates[0] if und_dates else "-", "und_end": und_dates[-1] if und_dates else "-", "n_und_days": len(und_dates),
-        "generated": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M"), "config": Path(args.config).name,
+        "config": Path(args.config).name,
         "files": [p.name for p in out.glob("*.parquet")] + [p.name for p in out.glob("*.png")],
     }
     (out / "audit_summary.md").write_text(report.markdown(r, s, cfg, meta))
