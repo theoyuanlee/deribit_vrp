@@ -1,0 +1,43 @@
+# Cleaning layer: turns audit findings into fixed rules. data/raw/ stays read-only.
+
+paths:
+  raw_root: data/raw
+  out_dir: data/processed
+
+asset: BTC
+
+ranges:
+  options:     {start: "2025-04-24", end: "2026-03-31"}
+  underlyings: {start: "2025-04-01", end: "2026-03-31"}
+
+conventions:
+  year_days: 365.25                  # tau_cal = (expiry - obs_time) / 365.25 d
+
+clock:
+  switch_time: "2025-06-28T00:00:00Z"   # tau_years becomes weighted vol-time from this label on
+  calendar_tol_s: 1.0                    # pre-switch: |tau_years - tau_cal| above this -> clock_regime 'calendar_anomaly'
+  local_tz: America/New_York             # the vol-time clock follows US Eastern time (shifts one UTC hour at DST)
+  min_tenor_days: 7                      # curves used to estimate hour-of-week weights
+  pair_gap_tol_s: 30                     # consecutive obs must be 3600 +/- this apart
+  top_residual_dates: 20
+
+rules:
+  # 1. snapshots
+  max_age_min: 10                    # age = bar end (timestamp + 1h) - obs_time
+  # 2. lingering rows inside a curve
+  lingering_tol_s: 60                # drop rows whose raw_timestamp < curve obs_time - this
+  # 3. expiries
+  min_tenor_days: 1.0                # calendar tenor at obs_time
+  min_r_squared: 0.9
+  require_vol_curve_check: GOOD
+  # 4. IV floor (flag only)
+  iv_floor: 0.03
+  iv_floor_tol: 1.0e-6
+
+flags:
+  butterfly_slope_tol: 1.0e-9        # on call prices recomputed from w
+  calendar_w_tol: 1.0e-9
+  calendar_k_grid: {min: -0.5, max: 0.5, step: 0.05}
+
+underlyings:
+  zero_run_min_h: 3                  # runs of >= this many consecutive zero log returns -> close set missing

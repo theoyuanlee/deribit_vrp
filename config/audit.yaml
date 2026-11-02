@@ -1,0 +1,57 @@
+# Data-quality audit configuration. Detect-and-report only: nothing here modifies data/raw/.
+
+paths:
+  raw_root: data/raw          # read-only
+  out_dir: data/audit
+
+asset: BTC
+
+ranges:
+  options:     {start: "2025-04-24", end: "2026-03-31"}
+  underlyings: {start: "2025-04-01", end: "2026-03-31"}
+
+conventions:
+  year_days: 365.25           # tau_years = (expiry - t) / (365.25 d); RV annualisation should use 365.25*24
+  bar_hours: 1
+
+snapshot:
+  intra_label_spread_flag_s: 60     # flag labels whose raw_timestamps (one per expiry) spread more than this
+  freshness_edges_min: [10, 60]     # tiers: <10, 10-60, >60 minutes (age = bar end - snapshot time)
+  top_gaps: 20
+
+invariants:
+  b76_rel_tol: 1.0e-8               # violation only if rel err > rel_tol AND abs err > abs_tol
+  b76_abs_tol: 1.0e-6               # USD; deep-OTM prices are ~1e-12
+  delta_abs_tol: 1.0e-8
+  tau_tol_s: 1.0                    # |tau*year - (expiry - raw_timestamp)|
+  iv_min: 0.05
+  iv_max: 5.0
+  iv_floor: 0.03                    # observed lower clamp of implied_vol
+  iv_floor_tol: 1.0e-6
+  butterfly_slope_tol: 1.0e-9       # adjacent call slopes must be non-decreasing in K
+  calendar_w_tol: 1.0e-9            # total variance must be non-decreasing in tenor at fixed log-moneyness
+  calendar_k_grid: {min: -0.5, max: 0.5, step: 0.05}
+  max_examples_per_check_per_day: 5
+  max_examples_per_check_total: 20
+
+expiries:
+  expiry_hour_utc: 8
+  r2_threshold: 0.9
+  tenor_buckets_days: [0, 1, 3, 7, 14, 30, 60, 90, 180, 400]
+  cm_target_days: 30
+  # Deribit listing heuristic: how many of each kind should be listed at any moment.
+  deribit_listing: {daily: 4, weekly: 4, monthly: 3, quarterly: 4}
+  min_time_to_expiry_h: 1           # don't expect expiries this close to expiry
+  tau_clock_min_days: 7             # expiries used to diagnose the tau clock (calendar days to expiry)
+  frequent_missing_frac: 0.9        # expected-and-present fraction below this -> "possibly missing"
+
+underlyings:
+  roll_window_h: 168                # trailing window for return std (excludes current bar)
+  roll_min_periods: 48
+  jump_k: 6.0                       # |log ret| > k * trailing std
+  zero_run_min_h: 3                 # report runs of >= this many consecutive zero returns
+  open_eq_rel_tol: 1.0e-12
+
+alignment:
+  min_tenor_h: 6
+  lags_h: [-1, 0, 1]
