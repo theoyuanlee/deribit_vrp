@@ -46,7 +46,7 @@ def run(df):
 ])
 def test_tau_cal_both_sides_of_switch(labels, regime):
     shift = 0.0 if regime == "calendar" else 5 * 3600.0  # post-switch tau_years deliberately off calendar
-    (curves, _, _), _ = run(synthetic_day(labels, tau_shift_s=shift))
+    (curves, _, _, _), _ = run(synthetic_day(labels, tau_shift_s=shift))
     expect = (curves.expiry - curves.obs_time).dt.total_seconds() / YEAR_S
     assert np.allclose(curves.tau_cal, expect, rtol=0, atol=1e-15)
     assert (curves.clock_regime == regime).all()
@@ -57,7 +57,7 @@ def test_tau_cal_both_sides_of_switch(labels, regime):
 
 
 def test_pre_switch_disagreement_is_flagged_anomaly():
-    (curves, _, _), _ = run(synthetic_day(["2025-05-03 14:00"], tau_shift_s=120.0))
+    (curves, _, _, _), _ = run(synthetic_day(["2025-05-03 14:00"], tau_shift_s=120.0))
     assert (curves.clock_regime == "calendar_anomaly").all() and curves.tau_vol.notna().all()
 
 
@@ -68,7 +68,7 @@ def test_switch_boundary_label():
 
 
 def test_w_exact_and_no_raw_iv_synthetic():
-    (curves, points, _), df = run(synthetic_day(["2025-06-28 03:00"], tau_shift_s=3600.0))
+    (curves, points, _, _), df = run(synthetic_day(["2025-06-28 03:00"], tau_shift_s=3600.0))
     raw = df[(df.option_type == "call") & ~df.is_atm].set_index(["timestamp", "expiry", "strike"])
     p = points.set_index(["timestamp", "expiry", "strike"])
     assert (p.w == (raw.implied_vol ** 2 * raw.tau_years).reindex(p.index)).all()
@@ -83,7 +83,7 @@ def test_w_exact_on_raw_data(date):
     df, _, _ = io.read_day(ROOT / CFG["paths"]["raw_root"], "options", CFG["asset"], date)
     if df is None:
         pytest.skip("raw data not available")
-    (curves, points, _), d = run(df)
+    (curves, points, _, _), d = run(df)
     calls = d[(d.option_type == "call") & ~d.is_atm].set_index(["timestamp", "expiry", "strike"])
     p = points.set_index(["timestamp", "expiry", "strike"])
     assert (p.w.to_numpy() == (calls.implied_vol ** 2 * calls.tau_years).reindex(p.index).to_numpy()).all()
@@ -126,7 +126,55 @@ def test_clock_recovers_weights_per_dst_regime():
         rows.append(pd.DataFrame({"timestamp": ts, "obs_time": ts + pd.Timedelta("59min59s"),
                                   "expiry": pd.Timestamp("2026-01-30", tz="UTC") + pd.Timedelta(days=exp_days),
                                   "tau_vol": tau_h / (CFG["conventions"]["year_days"] * 24), "clock_regime": "vol_time",
-                                  "tenor_days_cal": 30.0}))
+                                  "tenor_days_cal": 30.0, "flag_late_snapshot": False, "flag_short_tenor": False,
+                                  "flag_low_r2": False, "vendor_check": "GOOD"}))
     tab, dates, stats = clock.estimate(pd.concat(rows, ignore_index=True), CFG)
     assert np.allclose(tab.weight_edt, tw["edt"], atol=1e-9) and np.allclose(tab.weight_est, tw["est"], atol=1e-9)
     assert stats["frac_resid_gt_1e-3"] == 0 and stats["hours_differing_edt_est"] == 7 * 2  # each day: block start and end hour differ
+
+
+def test_flagged_curves_are_kept_with_flags():
+    """Former deletion rules 1b/3a/3b/3c now only flag: the curves stay in curves and points."""
+    df = synthetic_day(["2025-07-10 03:00", "2025-07-10 04:00", "2025-07-10 05:00", "2025-07-10 06:00"])
+    late = df.timestamp == pd.Timestamp("2025-07-10 04:00", tz="UTC")
+    df.loc[late, "raw_timestamp"] -= 30 * 60 * 1000          # snapshot 30 min before bar end
+    df.loc[df.timestamp == pd.Timestamp("2025-07-10 05:00", tz="UTC"), "r_squared"] = 0.5
+    df.loc[df.timestamp == pd.Timestamp("2025-07-10 06:00", tz="UTC"), "vol_curve_check"] = "IV_RV_DIFF"
+    (curves, points, pairs, ledger), _ = run(df)
+    c = curves.set_index(curves.timestamp.dt.hour)
+    assert len(curves) == 4 and points.groupby(["timestamp", "expiry"]).ngroups == 4
+    assert c.flag_late_snapshot.tolist() == [False, True, False, False]
+    assert c.flag_low_r2.tolist() == [False, False, True, False]
+    assert c.vendor_check.tolist() == ["GOOD", "GOOD", "GOOD", "IV_RV_DIFF"]
+    assert c.vendor_check_class.tolist() == ["GOOD", "GOOD", "GOOD", "value_screen"]
+    assert not c.flag_short_tenor.any()
+    assert "pass_research_default" not in curves.columns
+    led = pd.DataFrame(ledger).set_index("rule")
+    assert set(led.action) == {"delete", "flag"}
+    assert led.loc["3c_vendor_check=IV_RV_DIFF", "curves_flagged"] == 1
+    assert led.loc[f"1b_flag_late_snapshot_gt_{CFG['rules']['max_age_min']:g}min", "curves_flagged"] == 1
+
+
+def test_short_tenor_flag_uses_calendar_tenor():
+    near = synthetic_day(["2025-07-24 20:00"])                 # expiry 2025-07-25 08:00 -> ~11 h left
+    (curves, _, _, _), _ = run(near)
+    assert curves.flag_short_tenor.all() and (curves.tenor_days_cal < CFG["rules"]["min_tenor_days"]).all()
+
+
+def test_calendar_pairs_cover_all_combinations():
+    """Three expiries at one label -> 3 pairs; adjacent pairs carry the per-curve n_calendar_viol."""
+    frames = []
+    for exp, iv_scale in [("2025-07-25 08:00", 1.0), ("2025-08-29 08:00", 0.5), ("2025-09-26 08:00", 1.0)]:
+        d = synthetic_day(["2025-07-10 03:00"])
+        d["expiry"] = pd.Timestamp(exp, tz="UTC")
+        d["tau_years"] = (d.expiry - pd.to_datetime(d.raw_timestamp, unit="ms", utc=True)).dt.total_seconds() / YEAR_S
+        d["implied_vol"] *= iv_scale                            # middle expiry has much lower total variance
+        frames.append(d)
+    (curves, _, pairs, _), _ = run(pd.concat(frames, ignore_index=True))
+    assert len(pairs) == 3 and pairs.adjacent_in_panel.sum() == 2
+    assert (pairs.expiry_short < pairs.expiry_long).all()
+    adj = pairs[pairs.adjacent_in_panel].set_index("expiry_long").n_calendar_viol
+    c = curves.set_index("expiry")
+    assert (c.n_calendar_viol.reindex(adj.index) == adj).all()
+    assert adj.iloc[0] > 0                                      # Aug has less total variance than the shorter Jul
+    assert c.n_calendar_viol.iloc[0] == 0                       # shortest curve has no neighbour

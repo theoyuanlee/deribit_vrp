@@ -31,7 +31,12 @@ def dst_regime(ts: pd.Series, tz: str) -> pd.Series:
 def observations(curves: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     cc = cfg["clock"]
     yd = cfg["conventions"]["year_days"]
-    c = curves[(curves.clock_regime == "vol_time") & (curves.tenor_days_cal > cc["min_tenor_days"])]
+    # 时钟权重的估计使用固定条件，不随 research_default_filter 变化。
+    # (Fixed curve set, equal to the curves the former deletion rules kept: not late, not short tenor,
+    #  r^2 above threshold, vendor check GOOD.)
+    c = curves[(curves.clock_regime == "vol_time") & (curves.tenor_days_cal > cc["min_tenor_days"])
+               & ~curves.flag_late_snapshot & ~curves.flag_short_tenor & ~curves.flag_low_r2
+               & (curves.vendor_check == "GOOD")]
     c = c.sort_values(["expiry", "obs_time"])
     g = c.groupby("expiry")
     d_obs_h = g.obs_time.diff().dt.total_seconds() / 3600

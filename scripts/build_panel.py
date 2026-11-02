@@ -20,6 +20,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from audit import io  # noqa: E402
 from audit import options as aopt  # noqa: E402
 from clean import clock, panel, report, underlying  # noqa: E402
+import build_info  # noqa: E402
 
 
 def parse_args():
@@ -41,6 +42,7 @@ def select_dates(rng, args):
 
 
 def main():
+    started = build_info.now_utc()
     args = parse_args()
     cfg = io.load_config(args.config)
     acfg = panel.audit_cfg(cfg)
@@ -55,7 +57,7 @@ def main():
     print(f"options: {len(dates)} days -> {out}")
 
     state, last = aopt.new_state(), None
-    curves, points, ledger = [], [], []
+    curves, points, pairs, ledger = [], [], [], []
     t0 = time.time()
     for i, d in enumerate(dates):
         prev_day = (pd.Timestamp(d) - pd.Timedelta("1D")).strftime("%Y-%m-%d")
@@ -69,13 +71,14 @@ def main():
             continue
         df = aopt.prepare(df)
         es, state = aopt.expiry_snapshots(df, state, acfg)
-        c, p, led = panel.clean_day(df, es, d, cfg)
-        curves.append(c), points.append(p), ledger.extend(led)
+        c, p, pr, led = panel.clean_day(df, es, d, cfg)
+        curves.append(c), points.append(p), pairs.append(pr), ledger.extend(led)
         if (i + 1) % 25 == 0 or i + 1 == len(dates):
             print(f"  {i + 1}/{len(dates)} {d} ({time.time() - t0:.0f}s)", flush=True)
     curves = pd.concat([c for c in curves if len(c)], ignore_index=True)
     points = pd.concat([p for p in points if len(p)], ignore_index=True)
-    ledger = pd.DataFrame(ledger)
+    pairs = pd.concat([p for p in pairs if len(p)], ignore_index=True)
+    ledger = pd.DataFrame(ledger, columns=panel.LEDGER_COLS)
 
     # Underlying: always the full year (zero-run detection needs the continuous series).
     ur = cfg["ranges"]["underlyings"]
@@ -85,16 +88,18 @@ def main():
 
     curves.to_parquet(out / "surface_curves.parquet", index=False)
     points.to_parquet(out / "surface_points.parquet", index=False)
+    pairs.to_parquet(out / "surface_calendar_pairs.parquet", index=False)
     und.to_parquet(out / "underlying_hourly.parquet", index=False)
     clock_tab.to_parquet(out / "hour_of_week_clock.parquet", index=False)
     clock_dates.to_parquet(out / "hour_of_week_clock_residual_dates.parquet", index=False)
     ledger.to_parquet(out / "clean_rule_ledger_daily.parquet", index=False)
     meta = {"opt_dates": f"{dates[0]} 至 {dates[-1]}（{len(dates)} 天）" if len(dates) > 3 else ", ".join(dates),
-            "und_range": f"{ur['start']} 至 {ur['end']}", "generated": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M"),
+            "und_range": f"{ur['start']} 至 {ur['end']}",
             "files": sorted(p.name for p in out.glob("*.parquet"))}
-    (out / "clean_report.md").write_text(report.markdown(ledger, curves, points, und_stats, und, clock_tab, clock_dates,
+    (out / "clean_report.md").write_text(report.markdown(ledger, curves, points, pairs, und_stats, und, clock_tab, clock_dates,
                                                          clock_stats, cfg, meta))
-    print(f"done -> {out / 'clean_report.md'}  curves={len(curves)} points={len(points)}")
+    build_info.write(out, ROOT, "scripts/build_panel.py", Path(args.config), vars(args), started)
+    print(f"done -> {out / 'clean_report.md'}  curves={len(curves)} points={len(points)} pairs={len(pairs)}")
 
 
 if __name__ == "__main__":
