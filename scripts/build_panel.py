@@ -20,6 +20,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from audit import io  # noqa: E402
 from audit import options as aopt  # noqa: E402
 from clean import clock, panel, report, underlying  # noqa: E402
+import build_info  # noqa: E402
 
 
 def parse_args():
@@ -41,6 +42,7 @@ def select_dates(rng, args):
 
 
 def main():
+    started = build_info.now_utc()
     args = parse_args()
     cfg = io.load_config(args.config)
     acfg = panel.audit_cfg(cfg)
@@ -96,6 +98,7 @@ def main():
             "files": sorted(p.name for p in out.glob("*.parquet"))}
     (out / "clean_report.md").write_text(report.markdown(ledger, curves, points, pairs, und_stats, und, clock_tab, clock_dates,
                                                          clock_stats, cfg, meta))
+    build_info.write(out, ROOT, "scripts/build_panel.py", Path(args.config), vars(args), started)
     print(f"done -> {out / 'clean_report.md'}  curves={len(curves)} points={len(points)} pairs={len(pairs)}")
 
 

@@ -20,6 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from audit import alignment, expiries, invariants, io, options, report, underlyings  # noqa: E402
+import build_info  # noqa: E402
 
 
 def parse_args():
@@ -98,6 +99,7 @@ def run_options(dates: list[str], root: Path, cfg: dict) -> dict:
 
 
 def main():
+    started = build_info.now_utc()
     args = parse_args()
     cfg = io.load_config(args.config)
     root = ROOT / cfg["paths"]["raw_root"]
@@ -163,6 +165,7 @@ def main():
         "files": [p.name for p in out.glob("*.parquet")] + [p.name for p in out.glob("*.png")],
     }
     (out / "audit_summary.md").write_text(report.markdown(r, s, cfg, meta))
+    build_info.write(out, ROOT, "scripts/run_audit.py", Path(args.config), vars(args), started)
     print(f"done -> {out / 'audit_summary.md'}")
 
 
